@@ -97,9 +97,11 @@ def create_app(config: dict, components: dict = None):
     Returns:
         fastapi.FastAPI configurado.
     """
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
 
     app = FastAPI(
         title="Home Net Monitor",
@@ -117,6 +119,7 @@ def create_app(config: dict, components: dict = None):
         allow_headers=["*"],
     )
 
+    # Rotas REST + SSE
     if components:
         from api.routes import create_router
         router = create_router(
@@ -131,10 +134,23 @@ def create_app(config: dict, components: dict = None):
         )
         app.include_router(router)
 
-    # Página raiz — redireciona para o dashboard
-    @app.get("/", include_in_schema=False)
-    async def root():
-        return JSONResponse({"name": "Home Net Monitor", "version": "1.0.0", "docs": "/api/docs"})
+    # Arquivos estáticos (CSS, JS)
+    static_dir = Path(__file__).parent / "frontend" / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Dashboard HTML
+    templates_dir = Path(__file__).parent / "frontend" / "templates"
+    if templates_dir.exists():
+        templates = Jinja2Templates(directory=str(templates_dir))
+
+        @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+        async def dashboard(request: Request):
+            return templates.TemplateResponse("index.html", {"request": request})
+    else:
+        @app.get("/", include_in_schema=False)
+        async def root():
+            return JSONResponse({"name": "Home Net Monitor", "version": "1.0.0", "docs": "/api/docs"})
 
     # Handler de erros genérico
     @app.exception_handler(Exception)

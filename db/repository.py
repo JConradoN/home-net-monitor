@@ -183,7 +183,55 @@ class Repository:
         )
         await self._db.commit()
 
-    async def get_latency_series(self, target: str, hours: int = 24) -> list[dict]:
+    async def get_latency_series(self, hours: int = 24) -> dict:
+        """
+        Retorna série temporal de latência agregada para o dashboard.
+
+        Coleta dados de múltiplos alvos (gateway, cloudflare/google_dns,
+        dns interno) e alinha pelos timestamps mais próximos.
+
+        Args:
+            hours: Número de horas de histórico.
+
+        Returns:
+            {timestamps, gateway, internet, dns_internal} — listas paralelas.
+        """
+        since = time.time() - (hours * 3600)
+        # Consulta pivotada: pega avg por target em intervalos de 5 min
+        async with self._db.execute(
+            """SELECT CAST(timestamp/300 AS INTEGER)*300 AS bucket,
+                      target, AVG(rtt_avg_ms) AS rtt
+               FROM icmp_metrics
+               WHERE timestamp >= ?
+               GROUP BY bucket, target
+               ORDER BY bucket ASC""",
+            (since,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        # Reorganiza em {bucket: {target: rtt}}
+        buckets: dict = {}
+        for bucket, target, rtt in rows:
+            if bucket not in buckets:
+                buckets[bucket] = {}
+            buckets[bucket][target] = rtt
+
+        timestamps = sorted(buckets.keys())
+        gateway = [buckets[t].get("gateway") for t in timestamps]
+        internet = [
+            buckets[t].get("cloudflare") or buckets[t].get("google_dns")
+            for t in timestamps
+        ]
+        dns_internal = [buckets[t].get("dns_interno") for t in timestamps]
+
+        return {
+            "timestamps": timestamps,
+            "gateway": gateway,
+            "internet": internet,
+            "dns_internal": dns_internal,
+        }
+
+    async def get_latency_series_for_target(self, target: str, hours: int = 24) -> list[dict]:
         """
         Retorna série temporal de latência para um alvo específico.
 

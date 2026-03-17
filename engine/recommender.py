@@ -20,6 +20,14 @@ from .correlator import Alert, AlertSeverity
 
 logger = logging.getLogger(__name__)
 
+
+def _fmt(val, spec: str = ".1f") -> str:
+    """Formata um valor numérico ou retorna '?' se não disponível."""
+    if isinstance(val, (int, float)):
+        return format(val, spec)
+    return "?"
+
+
 # Nível de detalhe da recomendação
 DETAIL_SIMPLE = "simple"    # Linguagem leiga
 DETAIL_TECHNICAL = "technical"  # Instruções técnicas (Mikrotik, etc.)
@@ -136,8 +144,8 @@ class Recommender:
             alert_code="ISP_PROBLEM",
             title="Problema na operadora",
             summary=(
-                f"O roteador está OK (latência: {gw_rtt:.1f}ms), "
-                f"mas a internet está lenta ({inet_rtt:.1f}ms). "
+                f"O roteador está OK (latência: {_fmt(gw_rtt)}ms), "
+                f"mas a internet está lenta ({_fmt(inet_rtt)}ms). "
                 "O problema está na operadora, não no seu equipamento."
             ),
             priority=90,
@@ -183,8 +191,8 @@ class Recommender:
             alert_code="DNS_ROUTER_OVERLOAD",
             title="Trocar servidor DNS",
             summary=(
-                f"O DNS do seu roteador está lento ({dns_int:.1f}ms) "
-                f"enquanto o Cloudflare está rápido ({dns_ext:.1f}ms). "
+                f"O DNS do seu roteador está lento ({_fmt(dns_int)}ms) "
+                f"enquanto o Cloudflare está rápido ({_fmt(dns_ext)}ms). "
                 "Trocar o DNS vai melhorar a velocidade de abertura de sites."
             ),
             priority=50,
@@ -232,7 +240,7 @@ class Recommender:
         return Recommendation(
             alert_code="CPU_CRITICAL",
             title="Reduzir carga no roteador Mikrotik",
-            summary=f"CPU em {cpu:.1f}% há {duration:.0f}s. O roteador está sobrecarregado.",
+            summary=f"CPU em {_fmt(cpu)}% há {_fmt(duration, '.0f')}s. O roteador está sobrecarregado.",
             priority=95,
             category="mikrotik",
             steps=[
@@ -269,7 +277,7 @@ class Recommender:
         return Recommendation(
             alert_code="WIFI_SATURATION",
             title="Descongestionar canal Wi-Fi",
-            summary=f"O canal Wi-Fi está em {ch_util:.1f}% de utilização. Muitos dispositivos ou interferentes.",
+            summary=f"O canal Wi-Fi está em {_fmt(ch_util)}% de utilização. Muitos dispositivos ou interferentes.",
             priority=65,
             category="wifi",
             steps=[
@@ -294,7 +302,7 @@ class Recommender:
         return Recommendation(
             alert_code="RF_INTERFERENCE",
             title="Reduzir interferência de rádio",
-            summary=f"Taxa de retransmissão Wi-Fi em {retries:.1f}%. Há interferência no ambiente.",
+            summary=f"Taxa de retransmissão Wi-Fi em {_fmt(retries)}%. Há interferência no ambiente.",
             priority=55,
             category="interference",
             steps=[
@@ -318,7 +326,7 @@ class Recommender:
             alert_code="BUFFERBLOAT",
             title="Corrigir Bufferbloat",
             summary=(
-                f"Bufferbloat {grade} detectado (delta: {delta:.1f}ms). "
+                f"Bufferbloat {grade} detectado (delta: {_fmt(delta)}ms). "
                 "A latência aumenta muito quando a rede está carregada. "
                 "Configure QoS para resolver."
             ),
@@ -355,7 +363,7 @@ class Recommender:
         return Recommendation(
             alert_code="HIGH_NOISE",
             title="Reduzir ruído de fundo Wi-Fi",
-            summary=f"Noise floor em {noise:.1f} dBm (normal: < -75 dBm). Muita interferência no ambiente.",
+            summary=f"Noise floor em {_fmt(noise)} dBm (normal: < -75 dBm). Muita interferência no ambiente.",
             priority=25,
             category="interference",
             steps=[

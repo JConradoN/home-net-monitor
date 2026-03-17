@@ -225,7 +225,8 @@ class SSEHandler:
 
         try:
             # Estado inicial ao conectar
-            yield from self._initial_state()
+            for chunk in self._initial_state():
+                yield chunk
 
             last_keepalive = time.time()
 

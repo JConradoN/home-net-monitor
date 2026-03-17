@@ -1,0 +1,27 @@
+[Unit]
+Description=Home Net Monitor — Diagnóstico de rede doméstica
+Documentation=https://github.com/JConradoN/home-net-monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/home-net-monitor
+ExecStart=/opt/home-net-monitor/.venv/bin/python main.py --config /opt/home-net-monitor/config.json
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=home-net-monitor
+
+# Limites de recursos (RNF01 — < 5% CPU, RNF09 — Raspberry Pi 3+)
+CPUQuota=20%
+MemoryMax=256M
+
+# Capacidade ICMP sem root
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target
