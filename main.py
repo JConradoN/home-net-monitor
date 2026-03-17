@@ -80,7 +80,7 @@ def load_config(config_path: Path = None) -> dict:
 
 # ─── App Factory ─────────────────────────────────────────────────────────────
 
-def create_app(config: dict):
+def create_app(config: dict, components: dict = None):
     """
     Cria e configura a aplicação FastAPI.
 
@@ -91,22 +91,59 @@ def create_app(config: dict):
       - Página inicial (index.html)
 
     Args:
-        config: Dicionário de configuração.
+        config:     Dicionário de configuração.
+        components: Componentes inicializados por startup() (coletores, engine, db).
 
     Returns:
         fastapi.FastAPI configurado.
-
-    TODO: Implementar quando fastapi estiver instalado.
     """
-    # from fastapi import FastAPI, Request
-    # from fastapi.responses import HTMLResponse, StreamingResponse
-    # from fastapi.staticfiles import StaticFiles
-    # from fastapi.templating import Jinja2Templates
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
 
-    # app = FastAPI(title="Home Net Monitor", version="1.0.0", docs_url="/api/docs")
-    # ...
+    app = FastAPI(
+        title="Home Net Monitor",
+        version="1.0.0",
+        description="Monitor de rede doméstica — diagnóstico offline de gargalos",
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+    )
+
+    # CORS — apenas localhost (RNF06)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
+    if components:
+        from api.routes import create_router
+        router = create_router(
+            correlator=components.get("correlator"),
+            recommender=components.get("recommender"),
+            icmp_collector=components.get("icmp_collector"),
+            dns_collector=components.get("dns_collector"),
+            snmp_collector=components.get("snmp_collector"),
+            fingerprint_collector=components.get("fingerprint_collector"),
+            db=components.get("db"),
+            event_bus=components.get("event_bus"),
+        )
+        app.include_router(router)
+
+    # Página raiz — redireciona para o dashboard
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return JSONResponse({"name": "Home Net Monitor", "version": "1.0.0", "docs": "/api/docs"})
+
+    # Handler de erros genérico
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request, exc):
+        logger.error("Erro não tratado: %s", exc)
+        return JSONResponse(status_code=500, content={"detail": "Erro interno"})
+
     logger.info("App FastAPI configurada — host: %s:%s", config["host"], config["port"])
-    return None
+    return app
 
 
 # ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -297,20 +334,29 @@ async def main_async():
     )
     components["tasks"].append(corr_task)
 
-    # TODO: Iniciar Uvicorn com a app FastAPI
-    # import uvicorn
-    # app = create_app(config)
-    # config_uvicorn = uvicorn.Config(app, host=config["host"], port=config["port"],
-    #                                  log_level=config["log_level"].lower())
-    # server = uvicorn.Server(config_uvicorn)
-    # await server.serve()
+    app = create_app(config, components)
+
+    import uvicorn
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=config["host"],
+        port=config["port"],
+        log_level=config["log_level"].lower(),
+        access_log=False,
+    )
+    server = uvicorn.Server(uvicorn_config)
 
     logger.info("Dashboard disponível em http://%s:%s", config["host"], config["port"])
+    logger.info("Documentação da API:    http://%s:%s/api/docs", config["host"], config["port"])
 
     try:
-        await asyncio.gather(*components["tasks"])
+        await asyncio.gather(
+            server.serve(),
+            *components["tasks"],
+        )
     except KeyboardInterrupt:
         logger.info("Encerrando Home Net Monitor...")
+        server.should_exit = True
         for task in components["tasks"]:
             task.cancel()
         await components["db"].close()

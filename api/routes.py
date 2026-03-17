@@ -17,112 +17,154 @@ Endpoints:
   POST /api/wizard/snmp/test    — Testa conectividade SNMP (wizard)
   GET  /api/wizard/snmp/status  — Status do wizard SNMP
   GET  /api/bufferbloat         — Resultado do último teste de bufferbloat
+  GET  /api/events              — Stream SSE (text/event-stream)
 
 Segurança: apenas localhost (127.0.0.1) — RNF06.
 """
 
 import logging
-from typing import Optional
+import time
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Estas importações serão ativas quando FastAPI for instalado
-# from fastapi import APIRouter, HTTPException, Depends
-# from pydantic import BaseModel
 
 # ─── Request / Response Models ────────────────────────────────────────────────
 
 
-class NetworkStatusResponse:
-    """
-    Resposta do endpoint GET /api/status.
-
-    Campos:
-      status:          'ok' | 'warning' | 'critical'
-      active_alerts:   Número de alertas ativos
-      last_updated:    Timestamp da última coleta
-      gateway_rtt_ms:  Latência ao gateway em ms
-      internet_rtt_ms: Latência à internet em ms
-    """
-    pass
+class NetworkStatusResponse(BaseModel):
+    status: str                              # 'ok' | 'warning' | 'critical'
+    active_alerts: int
+    gateway_rtt_ms: Optional[float] = None
+    internet_rtt_ms: Optional[float] = None
+    last_updated: float = 0.0
 
 
-class AlertResponse:
-    """
-    Resposta individual de alerta.
-
-    Campos:
-      code, severity, title, description, user_message, timestamp, context
-    """
-    pass
-
-
-class ICMPMetricsResponse:
-    """
-    Métricas ICMP por alvo.
-
-    Campos:
-      targets: lista de {name, host, rtt_avg_ms, loss_percent, timestamp}
-    """
-    pass
+class AlertResponse(BaseModel):
+    code: str
+    severity: str
+    title: str
+    description: str
+    user_message: str
+    timestamp: float
+    color: str
+    context: dict = {}
 
 
-class DNSMetricsResponse:
-    """
-    Métricas DNS por resolver.
-
-    Campos:
-      resolvers: lista de {name, ip, avg_latency_ms, success_rate}
-      diagnosis: diagnóstico preliminar
-      severity: severidade do diagnóstico
-    """
-    pass
-
-
-class SNMPMetricsResponse:
-    """
-    Métricas SNMP do Mikrotik.
-
-    Campos:
-      host, cpu_usage, wan_in_bps, wan_out_bps, wifi_radios, uptime_seconds
-    """
-    pass
+class ICMPTargetMetrics(BaseModel):
+    name: str
+    host: str
+    rtt_min_ms: Optional[float] = None
+    rtt_avg_ms: Optional[float] = None
+    rtt_max_ms: Optional[float] = None
+    loss_percent: Optional[float] = None
+    reachable: bool = True
+    timestamp: float = 0.0
 
 
-class DeviceResponse:
-    """
-    Dispositivo descoberto na rede.
-
-    Campos:
-      ip, mac, hostname, vendor, device_type, device_type_label,
-      last_seen, first_seen
-    """
-    pass
+class ICMPMetricsResponse(BaseModel):
+    targets: list[ICMPTargetMetrics]
 
 
-class SNMPWizardTestRequest:
-    """
-    Payload para POST /api/wizard/snmp/test.
-
-    Campos:
-      host:      IP do equipamento a testar
-      community: Community string SNMP (padrão: 'public')
-      port:      Porta UDP (padrão: 161)
-    """
-    pass
+class DNSResolverMetrics(BaseModel):
+    name: str
+    ip: str
+    avg_latency_ms: Optional[float] = None
+    success_rate: Optional[float] = None
+    is_slow: bool = False
+    is_fast: bool = False
 
 
-class SNMPWizardTestResponse:
-    """
-    Resultado do teste de conectividade SNMP do wizard.
+class DNSMetricsResponse(BaseModel):
+    resolvers: list[DNSResolverMetrics]
+    diagnosis: Optional[str] = None
+    severity: Optional[str] = None
 
-    Campos:
-      success:    True se SNMP respondeu
-      message:    Mensagem descritiva
-      sysDescr:   Descrição do sistema (se disponível)
-      detected_host: IP detectado (se auto-discovery)
-    """
-    pass
+
+class WifiRadioMetrics(BaseModel):
+    ssid: Optional[str] = None
+    band: Optional[str] = None
+    clients: int = 0
+    channel_utilization: Optional[float] = None
+    noise_floor: Optional[float] = None
+    retries_percent: Optional[float] = None
+
+
+class SNMPMetricsResponse(BaseModel):
+    host: str
+    cpu_usage: Optional[float] = None
+    wan_in_bps: Optional[float] = None
+    wan_out_bps: Optional[float] = None
+    wifi_radios: list[dict] = []
+    uptime_seconds: Optional[float] = None
+    timestamp: float = 0.0
+
+
+class DeviceResponse(BaseModel):
+    ip: str
+    mac: Optional[str] = None
+    hostname: Optional[str] = None
+    vendor: Optional[str] = None
+    device_type: str = "unknown"
+    device_type_label: str = "Desconhecido"
+    display_name: str = ""
+    last_seen: float = 0.0
+    first_seen: float = 0.0
+
+
+class SNMPWizardTestRequest(BaseModel):
+    host: str
+    community: str = "public"
+    port: int = 161
+
+
+class SNMPWizardTestResponse(BaseModel):
+    success: bool
+    message: str
+    host: str
+    community: str
+
+
+class RecommendationStepResponse(BaseModel):
+    order: int
+    description: str
+    technical_detail: Optional[str] = None
+    link: Optional[str] = None
+
+
+class RecommendationResponse(BaseModel):
+    alert_code: str
+    title: str
+    summary: str
+    category: str
+    priority: int
+    steps: list[RecommendationStepResponse]
+
+
+class OutageResponse(BaseModel):
+    start_timestamp: float
+    end_timestamp: Optional[float] = None
+    duration_seconds: Optional[float] = None
+    recovered: bool = False
+
+
+class LatencyHistoryResponse(BaseModel):
+    timestamps: list[float]
+    gateway: list[Optional[float]]
+    internet: list[Optional[float]]
+    dns_internal: list[Optional[float]] = []
+
+
+class BufferbloatResponse(BaseModel):
+    baseline_rtt_ms: Optional[float] = None
+    loaded_rtt_ms: Optional[float] = None
+    delta_ms: Optional[float] = None
+    grade: Optional[str] = None
+    timestamp: float = 0.0
 
 
 # ─── Router ───────────────────────────────────────────────────────────────────
@@ -136,7 +178,8 @@ def create_router(
     snmp_collector=None,
     fingerprint_collector=None,
     db=None,
-):
+    event_bus=None,
+) -> APIRouter:
     """
     Cria e retorna o APIRouter com todos os endpoints configurados.
 
@@ -148,22 +191,116 @@ def create_router(
         snmp_collector:         Instância do SNMPCollector.
         fingerprint_collector:  Instância do FingerprintCollector.
         db:                     Repositório SQLite para histórico.
+        event_bus:              EventBus para o endpoint SSE.
 
     Returns:
-        fastapi.APIRouter configurado.
-
-    Uso em main.py:
-        router = create_router(correlator=corr, ...)
-        app.include_router(router)
+        fastapi.APIRouter configurado com todos os endpoints.
     """
-    # TODO: Implementar com FastAPI quando dependências forem instaladas
-    # from fastapi import APIRouter
-    # router = APIRouter(prefix="/api")
-    # ... definir rotas ...
-    # return router
+    router = APIRouter(prefix="/api", tags=["hnm"])
+    routes = APIRoutes(
+        correlator=correlator,
+        recommender=recommender,
+        icmp_collector=icmp_collector,
+        dns_collector=dns_collector,
+        snmp_collector=snmp_collector,
+        fingerprint_collector=fingerprint_collector,
+        db=db,
+    )
 
-    logger.info("Criando API router")
-    return None
+    @router.get("/status", response_model=NetworkStatusResponse, summary="Status geral da rede")
+    async def get_status():
+        return await routes.get_status()
+
+    @router.get("/alerts", response_model=list[AlertResponse], summary="Alertas ativos")
+    async def get_alerts():
+        return await routes.get_alerts()
+
+    @router.get("/metrics/icmp", response_model=ICMPMetricsResponse, summary="Métricas ICMP")
+    async def get_icmp_metrics():
+        return await routes.get_icmp_metrics()
+
+    @router.get("/metrics/dns", response_model=DNSMetricsResponse, summary="Métricas DNS")
+    async def get_dns_metrics():
+        return await routes.get_dns_metrics()
+
+    @router.get("/metrics/snmp", response_model=Optional[SNMPMetricsResponse], summary="Métricas SNMP")
+    async def get_snmp_metrics():
+        result = await routes.get_snmp_metrics()
+        if not result:
+            return None
+        return result
+
+    @router.get("/devices", response_model=list[DeviceResponse], summary="Dispositivos descobertos")
+    async def get_devices():
+        return await routes.get_devices()
+
+    @router.get(
+        "/history/outages",
+        response_model=list[OutageResponse],
+        summary="Histórico de quedas (7 dias)",
+    )
+    async def get_outage_history(days: int = Query(7, ge=1, le=30)):
+        return await routes.get_outage_history(days=days)
+
+    @router.get(
+        "/history/latency",
+        response_model=LatencyHistoryResponse,
+        summary="Série temporal de latência (24h)",
+    )
+    async def get_latency_history(hours: int = Query(24, ge=1, le=168)):
+        return await routes.get_latency_history(hours=hours)
+
+    @router.get(
+        "/recommendations",
+        response_model=list[RecommendationResponse],
+        summary="Recomendações ativas",
+    )
+    async def get_recommendations():
+        return await routes.get_recommendations()
+
+    @router.post(
+        "/wizard/snmp/test",
+        response_model=SNMPWizardTestResponse,
+        summary="Testar conectividade SNMP",
+    )
+    async def post_wizard_snmp_test(body: SNMPWizardTestRequest):
+        return await routes.post_wizard_snmp_test(
+            host=body.host,
+            community=body.community,
+            port=body.port,
+        )
+
+    @router.get(
+        "/wizard/snmp/status",
+        summary="Status do wizard SNMP",
+    )
+    async def get_wizard_snmp_status():
+        if snmp_collector and snmp_collector.last_result:
+            return {"configured": True, "host": snmp_collector.host}
+        return {"configured": False, "host": None}
+
+    @router.get("/bufferbloat", response_model=Optional[BufferbloatResponse], summary="Último teste de bufferbloat")
+    async def get_bufferbloat():
+        return await routes.get_bufferbloat()
+
+    @router.get("/events", summary="Stream SSE de eventos em tempo real")
+    async def sse_stream(request: Request):
+        if event_bus is None:
+            raise HTTPException(status_code=503, detail="EventBus não disponível")
+        from api.sse import SSEHandler
+        handler = SSEHandler(event_bus=event_bus, correlator=correlator)
+        return StreamingResponse(
+            handler.stream(request),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    logger.info("API router criado — %d endpoints registrados", len(router.routes))
+    return router
 
 
 class APIRoutes:
@@ -191,9 +328,6 @@ class APIRoutes:
 
         Combina o status do correlator com métricas recentes de ICMP
         para produzir um resumo rápido para o header do dashboard.
-
-        Returns:
-            {status, active_alerts, gateway_rtt_ms, internet_rtt_ms, last_updated}
         """
         status = "ok"
         active_alerts_count = 0
@@ -216,6 +350,7 @@ class APIRoutes:
             "active_alerts": active_alerts_count,
             "gateway_rtt_ms": gateway_rtt,
             "internet_rtt_ms": internet_rtt,
+            "last_updated": time.time(),
         }
 
     async def get_alerts(self) -> list[dict]:
@@ -223,7 +358,6 @@ class APIRoutes:
         GET /api/alerts — Retorna lista de alertas ativos.
 
         Ordenados por severidade (Critical primeiro).
-        Inclui user_message para exibição no dashboard sem modificação.
         """
         if not self.correlator:
             return []
@@ -236,6 +370,7 @@ class APIRoutes:
                 "user_message": a.user_message,
                 "timestamp": a.timestamp,
                 "color": a.severity_color,
+                "context": a.context,
             }
             for a in self.correlator.active_alerts
         ]
@@ -243,8 +378,6 @@ class APIRoutes:
     async def get_icmp_metrics(self) -> dict:
         """
         GET /api/metrics/icmp — Retorna últimas métricas ICMP por alvo.
-
-        Inclui latência (min/avg/max) e perda de pacotes para cada alvo configurado.
         """
         if not self.icmp_collector:
             return {"targets": []}
@@ -268,8 +401,6 @@ class APIRoutes:
     async def get_dns_metrics(self) -> dict:
         """
         GET /api/metrics/dns — Retorna últimas métricas DNS por resolver.
-
-        Inclui latência média, taxa de sucesso e diagnóstico preliminar.
         """
         if not self.dns_collector or not self.dns_collector.last_result:
             return {"resolvers": []}
@@ -290,14 +421,12 @@ class APIRoutes:
             "severity": result.severity,
         }
 
-    async def get_snmp_metrics(self) -> dict:
+    async def get_snmp_metrics(self) -> Optional[dict]:
         """
         GET /api/metrics/snmp — Retorna últimas métricas SNMP do Mikrotik.
-
-        Inclui CPU, tráfego WAN, clientes Wi-Fi por rádio, noise floor, retries.
         """
         if not self.snmp_collector or not self.snmp_collector.last_result:
-            return {}
+            return None
         r = self.snmp_collector.last_result
         return {
             "host": r.host,
@@ -312,8 +441,6 @@ class APIRoutes:
     async def get_devices(self) -> list[dict]:
         """
         GET /api/devices — Retorna lista de dispositivos descobertos na rede.
-
-        Inclui IP, MAC, hostname, fabricante e tipo classificado.
         """
         if not self.fingerprint_collector:
             return []
@@ -335,13 +462,9 @@ class APIRoutes:
     async def get_recommendations(self) -> list[dict]:
         """
         GET /api/recommendations — Retorna recomendações ativas.
-
-        Geradas pelo Recommender com base nos alertas do Correlator.
-        Cada recomendação contém passos ordenados do simples ao técnico.
         """
         if not self.correlator or not self.recommender:
             return []
-        from engine.recommender import Recommender
         alerts = self.correlator.active_alerts
         recs = self.recommender.generate(alerts)
         return [
@@ -356,6 +479,7 @@ class APIRoutes:
                         "order": s.order,
                         "description": s.description,
                         "technical_detail": s.technical_detail,
+                        "link": s.link,
                     }
                     for s in r.steps
                 ],
@@ -366,49 +490,28 @@ class APIRoutes:
     async def get_outage_history(self, days: int = 7) -> list[dict]:
         """
         GET /api/history/outages — Histórico de quedas dos últimos N dias.
-
-        Args:
-            days: Número de dias de histórico (padrão: 7).
-
-        Returns:
-            Lista de {start_timestamp, duration_seconds, recovered}.
         """
         if not self.db:
             return []
-        # TODO: return await self.db.get_outages(days=days)
-        return []
+        try:
+            return await self.db.get_outages(days=days)
+        except Exception:
+            return []
 
     async def get_latency_history(self, hours: int = 24) -> dict:
         """
         GET /api/history/latency — Série temporal de latência das últimas N horas.
-
-        Usado para renderizar gráficos no dashboard (Chart.js).
-
-        Args:
-            hours: Número de horas de histórico (padrão: 24).
-
-        Returns:
-            {timestamps: [...], gateway: [...], internet: [...], dns_internal: [...]}
         """
         if not self.db:
-            return {"timestamps": [], "gateway": [], "internet": []}
-        # TODO: return await self.db.get_latency_series(hours=hours)
-        return {"timestamps": [], "gateway": [], "internet": []}
+            return {"timestamps": [], "gateway": [], "internet": [], "dns_internal": []}
+        try:
+            return await self.db.get_latency_series(hours=hours)
+        except Exception:
+            return {"timestamps": [], "gateway": [], "internet": [], "dns_internal": []}
 
     async def post_wizard_snmp_test(self, host: str, community: str = "public", port: int = 161) -> dict:
         """
         POST /api/wizard/snmp/test — Testa conectividade SNMP (Wizard SNMP).
-
-        Usado pelo Wizard de Configuração SNMP (PRD seção 4.1-G) para
-        validar que o Mikrotik está acessível e com SNMP habilitado.
-
-        Args:
-            host:      IP do equipamento a testar.
-            community: Community string SNMP.
-            port:      Porta UDP SNMP.
-
-        Returns:
-            {success, message, sysDescr}
         """
         from collectors.snmp import SNMPCollector
         collector = SNMPCollector(host=host, community=community, port=port)
@@ -418,4 +521,21 @@ class APIRoutes:
             "message": "SNMP respondendo corretamente." if ok else "SNMP não respondeu. Verifique a configuração.",
             "host": host,
             "community": community,
+        }
+
+    async def get_bufferbloat(self) -> Optional[dict]:
+        """
+        GET /api/bufferbloat — Resultado do último teste de bufferbloat.
+        """
+        if not self.icmp_collector:
+            return None
+        result = getattr(self.icmp_collector, "last_bufferbloat", None)
+        if result is None:
+            return None
+        return {
+            "baseline_rtt_ms": result.baseline_rtt,
+            "loaded_rtt_ms": result.loaded_rtt,
+            "delta_ms": result.delta_ms,
+            "grade": result.grade,
+            "timestamp": getattr(result, "timestamp", time.time()),
         }
