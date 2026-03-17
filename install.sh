@@ -62,9 +62,21 @@ if ! python3 -c "import ensurepip" &>/dev/null; then
         || error "Falha ao instalar python3-venv. Execute: apt install python3-venv"
 fi
 
+# Remove venv incompleto (sem pip) criado antes de python3-venv ser instalado
+if [[ -d "$VENV_DIR" && ! -f "$VENV_DIR/bin/pip" ]]; then
+    warn "Venv incompleto detectado (sem pip) — recriando..."
+    rm -rf "$VENV_DIR"
+fi
+
 if [[ ! -d "$VENV_DIR" ]]; then
     info "Criando ambiente virtual em $VENV_DIR"
-    python3 -m venv "$VENV_DIR"
+    python3 -m venv "$VENV_DIR" || error "Falha ao criar venv em $VENV_DIR"
+fi
+
+# Garante que pip existe no venv
+if [[ ! -f "$VENV_DIR/bin/pip" ]]; then
+    info "Bootstrapping pip no venv..."
+    "$VENV_DIR/bin/python3" -m ensurepip --upgrade || error "Falha ao instalar pip no venv"
 fi
 
 info "Instalando dependências Python..."
