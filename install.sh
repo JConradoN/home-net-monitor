@@ -54,6 +54,14 @@ for pkg in iputils-ping arp-scan; do
 done
 
 # ── 3. Ambiente virtual Python ───────────────────────────────────────────────
+# Garante que python3-venv está instalado (necessário em Debian/Ubuntu)
+if ! python3 -c "import ensurepip" &>/dev/null; then
+    info "Instalando python3-venv..."
+    apt-get install -y --no-install-recommends "python$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')-venv" \
+        || apt-get install -y --no-install-recommends python3-venv \
+        || error "Falha ao instalar python3-venv. Execute: apt install python3-venv"
+fi
+
 if [[ ! -d "$VENV_DIR" ]]; then
     info "Criando ambiente virtual em $VENV_DIR"
     python3 -m venv "$VENV_DIR"
