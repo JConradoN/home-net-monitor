@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home Net Monitor</title>
+
+  <!-- Tailwind CSS via CDN (produção: build local) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#3b82f6', 600: '#2563eb' }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Chart.js para gráficos de latência -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="/static/css/dashboard.css" />
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans antialiased">
+
+  <!-- ═══════════════════════════════════════════════════════════════ HEADER -->
+  <header class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🛜</span>
+      <h1 class="text-xl font-bold tracking-tight">Home Net Monitor</h1>
+    </div>
+
+    <!-- Status badge — atualizado via SSE -->
+    <div id="status-badge" class="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium
+         bg-gray-800 text-gray-400 transition-colors duration-300">
+      <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500"></span>
+      <span id="status-text">Conectando...</span>
+    </div>
+  </header>
+
+  <!-- ════════════════════════════════════════════════════════════ MAIN GRID -->
+  <main class="px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- ──────────────────────────────────── COLUNA ESQUERDA (métricas 2/3) -->
+    <div class="lg:col-span-2 flex flex-col gap-6">
+
+      <!-- Cartões de métricas rápidas -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div class="metric-card" id="card-gateway">
+          <div class="metric-label">Gateway RTT</div>
+          <div class="metric-value" id="val-gateway-rtt">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric-card" id="card-internet">
+          <div class="metric-label">Internet RTT</div>
+          <div class="metric-value" id="val-internet-rtt">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric-card" id="card-dns">
+          <div class="metric-label">DNS Interno</div>
+          <div class="metric-value" id="val-dns-internal">—</div>
+          <div class="metric-unit">ms</div>
+        </div>
+        <div class="metric-card" id="card-cpu">
+          <div class="metric-label">CPU Mikrotik</div>
+          <div class="metric-value" id="val-cpu">—</div>
+          <div class="metric-unit">%</div>
+        </div>
+      </div>
+
+      <!-- Gráfico de latência — 24h -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold text-gray-200">Latência — últimas 24h</h2>
+          <select id="chart-target" onchange="switchChartTarget(this.value)"
+            class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-300">
+            <option value="gateway">Gateway</option>
+            <option value="cloudflare">Cloudflare (1.1.1.1)</option>
+            <option value="google_dns">Google DNS (8.8.8.8)</option>
+          </select>
+        </div>
+        <canvas id="latency-chart" height="120"></canvas>
+      </div>
+
+      <!-- Tráfego WAN -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <h2 class="font-semibold text-gray-200 mb-4">Tráfego WAN</h2>
+        <canvas id="traffic-chart" height="90"></canvas>
+      </div>
+
+      <!-- Dispositivos conectados -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold text-gray-200">Dispositivos na Rede</h2>
+          <span id="device-count" class="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded-full">0</span>
+        </div>
+        <div id="device-list" class="space-y-2">
+          <!-- Populado por JS via /api/devices -->
+        </div>
+      </div>
+
+    </div><!-- /col-esquerda -->
+
+    <!-- ────────────────────────────────────── COLUNA DIREITA (alertas 1/3) -->
+    <div class="flex flex-col gap-6">
+
+      <!-- Alertas ativos -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <h2 class="font-semibold text-gray-200 mb-4">Alertas Ativos</h2>
+        <div id="alert-list" class="space-y-3">
+          <p class="text-sm text-gray-500 italic">Nenhum alerta no momento.</p>
+        </div>
+      </div>
+
+      <!-- Recomendações -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <h2 class="font-semibold text-gray-200 mb-4">Recomendações</h2>
+        <div id="recommendation-list" class="space-y-4">
+          <p class="text-sm text-gray-500 italic">Nenhuma recomendação ativa.</p>
+        </div>
+      </div>
+
+      <!-- Histórico de quedas -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <h2 class="font-semibold text-gray-200 mb-4">Histórico de Quedas (7 dias)</h2>
+        <div id="outage-list" class="space-y-2">
+          <p class="text-sm text-gray-500 italic">Nenhuma queda registrada.</p>
+        </div>
+      </div>
+
+      <!-- Wizard SNMP -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+        <h2 class="font-semibold text-gray-200 mb-3">Configurar SNMP (Mikrotik)</h2>
+        <p class="text-xs text-gray-400 mb-3">
+          Habilite o SNMP no Mikrotik para obter métricas detalhadas de CPU,
+          tráfego e Wi-Fi.
+        </p>
+        <div class="space-y-2">
+          <input id="snmp-host" type="text" placeholder="IP do Mikrotik (ex: 192.168.1.1)"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                   text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+          <input id="snmp-community" type="text" placeholder="Community (padrão: public)"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm
+                   text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500" />
+          <button onclick="testSNMP()"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-sm
+                   font-medium transition-colors">
+            Testar Conectividade SNMP
+          </button>
+          <div id="snmp-result" class="text-xs text-gray-400 hidden"></div>
+        </div>
+
+        <details class="mt-4">
+          <summary class="text-xs text-blue-400 cursor-pointer hover:text-blue-300">
+            Como habilitar SNMP no Mikrotik
+          </summary>
+          <pre class="mt-2 bg-gray-950 rounded-lg p-3 text-xs text-green-400 overflow-x-auto">/snmp set enabled=yes
+/snmp community add name=public \
+  addresses=192.168.1.0/24</pre>
+        </details>
+      </div>
+
+    </div><!-- /col-direita -->
+
+  </main><!-- /main -->
+
+  <!-- ══════════════════════════════════════════════════════════════ SCRIPTS -->
+  <script src="/static/js/sse.js"></script>
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/dashboard.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Home Net Monitor — Dependências Python
+# Instalar: pip install -r requirements.txt
+
+# ─── Web Framework ────────────────────────────────────────────────────────────
+fastapi>=0.111.0          # Framework REST + suporte nativo a SSE
+uvicorn[standard]>=0.29.0 # Servidor ASGI para FastAPI
+jinja2>=3.1.4             # Templates HTML (index.html)
+
+# ─── Banco de Dados ───────────────────────────────────────────────────────────
+aiosqlite>=0.20.0         # SQLite assíncrono (asyncio)
+
+# ─── Coleta de Rede ───────────────────────────────────────────────────────────
+dnspython>=2.6.1          # Queries DNS com suporte a resolver personalizado
+pysnmp>=6.1.0             # SNMP v2c para Mikrotik e outros equipamentos
+scapy>=2.5.0              # ARP scan para descoberta de dispositivos
+netifaces>=0.11.0         # Detecção de interfaces e gateway padrão
+zeroconf>=0.132.0         # mDNS para resolução de hostname de dispositivos
+
+# ─── Testes ───────────────────────────────────────────────────────────────────
+pytest>=8.2.0             # Framework de testes
+pytest-asyncio>=0.23.0    # Suporte a testes assíncronos (asyncio)
+pytest-cov>=5.0.0         # Cobertura de código (meta: ≥ 80% — RNF10)
+
+# ─── Desenvolvimento ──────────────────────────────────────────────────────────
+# (opcional — apenas ambiente de desenvolvimento)
+# black>=24.4.0            # Formatação de código
+# ruff>=0.4.0              # Linter rápido
+# mypy>=1.10.0             # Type checking estático

@@ -1,0 +1,25 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "db_path": "data/home_net_monitor.db",
+  "icmp_interval": 30,
+  "dns_interval": 60,
+  "snmp_interval": 60,
+  "fingerprint_interval": 300,
+  "snmp_host": null,
+  "snmp_community": "public",
+  "log_level": "INFO",
+  "thresholds": {
+    "gw_latency_high": 50,
+    "internet_latency_high": 150,
+    "dns_slow": 100,
+    "dns_fast": 30,
+    "cpu_critical": 80,
+    "cpu_duration": 60,
+    "channel_util": 70,
+    "retries": 15,
+    "noise_floor": -75,
+    "bufferbloat_delta": 30,
+    "outage_duration": 30
+  }
+}

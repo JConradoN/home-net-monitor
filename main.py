@@ -1,0 +1,320 @@
+"""
+main.py — Ponto de entrada do Home Net Monitor.
+
+Inicializa todos os coletores, o motor de correlação, o repositório SQLite,
+o EventBus SSE e sobe o servidor FastAPI/Uvicorn.
+
+Fluxo de inicialização:
+  1. Carrega configuração (config.json ou variáveis de ambiente)
+  2. Inicializa banco de dados SQLite (WAL mode)
+  3. Auto-detecta gateway e resolver DNS interno
+  4. Instancia coletores (ICMP, DNS, SNMP, Fingerprint)
+  5. Instancia Correlator + Recommender + EventBus
+  6. Cria app FastAPI com rotas REST e endpoint SSE
+  7. Sobe Uvicorn em localhost:8080
+
+Uso:
+    python main.py
+    python main.py --port 8080 --host 127.0.0.1
+    python main.py --config config.json
+"""
+
+import argparse
+import asyncio
+import logging
+import sys
+from pathlib import Path
+
+# ─── Logging ─────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("home_net_monitor.log", encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger("hnm")
+
+
+# ─── Config ───────────────────────────────────────────────────────────────────
+
+DEFAULT_CONFIG = {
+    "host": "127.0.0.1",          # RNF06 — apenas localhost
+    "port": 8080,
+    "db_path": "data/home_net_monitor.db",
+    "icmp_interval": 30,           # segundos entre coletas ICMP
+    "dns_interval": 60,
+    "snmp_interval": 60,
+    "fingerprint_interval": 300,
+    "snmp_host": None,             # Detectado automaticamente se None
+    "snmp_community": "public",
+    "log_level": "INFO",
+}
+
+
+def load_config(config_path: Path = None) -> dict:
+    """
+    Carrega configuração do arquivo JSON ou retorna defaults.
+
+    Args:
+        config_path: Caminho para config.json. Se None, usa DEFAULT_CONFIG.
+
+    Returns:
+        Dicionário de configuração mesclado com defaults.
+    """
+    import json
+
+    config = DEFAULT_CONFIG.copy()
+    if config_path and config_path.exists():
+        try:
+            with open(config_path) as f:
+                user_config = json.load(f)
+            config.update(user_config)
+            logger.info("Configuração carregada de %s", config_path)
+        except Exception as exc:
+            logger.warning("Falha ao carregar config: %s — usando defaults", exc)
+    return config
+
+
+# ─── App Factory ─────────────────────────────────────────────────────────────
+
+def create_app(config: dict):
+    """
+    Cria e configura a aplicação FastAPI.
+
+    Registra:
+      - Rotas REST (/api/*)
+      - Endpoint SSE (/api/events)
+      - Servir arquivos estáticos (frontend/)
+      - Página inicial (index.html)
+
+    Args:
+        config: Dicionário de configuração.
+
+    Returns:
+        fastapi.FastAPI configurado.
+
+    TODO: Implementar quando fastapi estiver instalado.
+    """
+    # from fastapi import FastAPI, Request
+    # from fastapi.responses import HTMLResponse, StreamingResponse
+    # from fastapi.staticfiles import StaticFiles
+    # from fastapi.templating import Jinja2Templates
+
+    # app = FastAPI(title="Home Net Monitor", version="1.0.0", docs_url="/api/docs")
+    # ...
+    logger.info("App FastAPI configurada — host: %s:%s", config["host"], config["port"])
+    return None
+
+
+# ─── Lifecycle ────────────────────────────────────────────────────────────────
+
+async def startup(config: dict):
+    """
+    Lifecycle de startup: inicializa todos os componentes.
+
+    Args:
+        config: Configuração carregada.
+    """
+    logger.info("╔══════════════════════════════════╗")
+    logger.info("║     Home Net Monitor v1.0        ║")
+    logger.info("╚══════════════════════════════════╝")
+
+    # 1. Banco de dados
+    from db.repository import Repository
+    db = Repository(db_path=Path(config["db_path"]))
+    await db.initialize()
+
+    # 2. EventBus SSE
+    from api.sse import EventBus, MetricsBroadcaster
+    event_bus = EventBus()
+
+    # 3. Motor de correlação + recomendações
+    from engine.correlator import Correlator
+    from engine.recommender import Recommender
+    correlator = Correlator(event_bus=event_bus)
+    recommender = Recommender()
+
+    # 4. Coletores
+    from collectors.icmp import ICMPCollector
+    from collectors.dns import DNSCollector
+    from collectors.fingerprint import FingerprintCollector
+
+    icmp_collector = ICMPCollector(interval=config["icmp_interval"], db=db)
+    dns_collector = DNSCollector(interval=config["dns_interval"], db=db)
+    fingerprint_collector = FingerprintCollector(interval=config["fingerprint_interval"], db=db)
+
+    # SNMP — apenas se host configurado ou detectável
+    snmp_collector = None
+    if config.get("snmp_host"):
+        from collectors.snmp import SNMPCollector
+        snmp_collector = SNMPCollector(
+            host=config["snmp_host"],
+            community=config["snmp_community"],
+            interval=config["snmp_interval"],
+            db=db,
+        )
+        logger.info("SNMP habilitado para %s", config["snmp_host"])
+
+    # 5. MetricsBroadcaster (SSE)
+    broadcaster = MetricsBroadcaster(
+        event_bus=event_bus,
+        icmp_collector=icmp_collector,
+        snmp_collector=snmp_collector,
+        dns_collector=dns_collector,
+    )
+
+    # 6. Inicia coletores como tasks asyncio
+    tasks = [
+        asyncio.create_task(icmp_collector.start(), name="icmp"),
+        asyncio.create_task(dns_collector.start(), name="dns"),
+        asyncio.create_task(fingerprint_collector.start(), name="fingerprint"),
+        asyncio.create_task(broadcaster.start(), name="sse-broadcast"),
+    ]
+    if snmp_collector:
+        tasks.append(asyncio.create_task(snmp_collector.start(), name="snmp"))
+
+    logger.info("Todos os coletores iniciados (%d tasks)", len(tasks))
+
+    return {
+        "db": db,
+        "event_bus": event_bus,
+        "correlator": correlator,
+        "recommender": recommender,
+        "icmp_collector": icmp_collector,
+        "dns_collector": dns_collector,
+        "snmp_collector": snmp_collector,
+        "fingerprint_collector": fingerprint_collector,
+        "tasks": tasks,
+    }
+
+
+async def run_collection_loop(components: dict, interval: float = 30.0):
+    """
+    Loop principal de correlação: a cada ciclo de coleta,
+    monta um CorrelationSnapshot e passa ao Correlator.
+
+    Args:
+        components: Dicionário de componentes retornado por startup().
+        interval:   Intervalo entre ciclos de correlação em segundos.
+    """
+    from engine.correlator import CorrelationSnapshot
+    import time
+
+    correlator = components["correlator"]
+    icmp = components["icmp_collector"]
+    dns = components["dns_collector"]
+    snmp = components["snmp_collector"]
+    event_bus = components["event_bus"]
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            snapshot = CorrelationSnapshot()
+
+            # Dados ICMP
+            if icmp:
+                results = icmp.last_results
+                gw = results.get("gateway")
+                inet = results.get("cloudflare") or results.get("google_dns")
+                if gw:
+                    snapshot.gateway_rtt_ms = gw.rtt_avg
+                    snapshot.gateway_loss = gw.packet_loss
+                    if not gw.is_reachable and "gateway" in icmp._outage_start:
+                        snapshot.gateway_unreachable_since = icmp._outage_start["gateway"]
+                if inet:
+                    snapshot.internet_rtt_ms = inet.rtt_avg
+                    snapshot.internet_loss = inet.packet_loss
+
+            # Dados DNS
+            if dns and dns.last_result:
+                dns_result = dns.last_result
+                interno = dns_result.resolvers.get("interno")
+                externo = dns_result.get_external_fastest()
+                if interno:
+                    snapshot.dns_internal_ms = interno.avg_latency_ms
+                if externo:
+                    snapshot.dns_external_ms = externo.avg_latency_ms
+
+            # Dados SNMP
+            if snmp and snmp.last_result:
+                r = snmp.last_result
+                snapshot.cpu_usage = r.cpu_usage
+                snapshot.cpu_high_since = snmp._cpu_high_since
+                if r.wifi_radios:
+                    radio = r.wifi_radios[0]
+                    snapshot.channel_utilization = radio.get("channel_utilization")
+                    snapshot.noise_floor = radio.get("noise_floor")
+                    snapshot.retries_percent = radio.get("retries_percent")
+
+            # Correlação
+            alerts = correlator.analyze(snapshot)
+            if alerts:
+                for alert in alerts:
+                    event_bus.publish_alert(alert)
+
+            status = correlator.get_status()
+            event_bus.publish_status(status, len(correlator.active_alerts))
+
+        except Exception as exc:
+            logger.error("Erro no loop de correlação: %s", exc)
+
+
+# ─── Entry Point ──────────────────────────────────────────────────────────────
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Home Net Monitor")
+    parser.add_argument("--host", default=None, help="Host de escuta (padrão: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=None, help="Porta (padrão: 8080)")
+    parser.add_argument("--config", type=Path, default=Path("config.json"), help="Arquivo de configuração")
+    parser.add_argument("--snmp-host", default=None, help="IP do Mikrotik para SNMP")
+    parser.add_argument("--debug", action="store_true", help="Modo debug (log detalhado)")
+    return parser.parse_args()
+
+
+async def main_async():
+    args = parse_args()
+    config = load_config(args.config)
+
+    if args.host:
+        config["host"] = args.host
+    if args.port:
+        config["port"] = args.port
+    if args.snmp_host:
+        config["snmp_host"] = args.snmp_host
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        config["log_level"] = "DEBUG"
+
+    components = await startup(config)
+
+    # Adiciona loop de correlação
+    corr_task = asyncio.create_task(
+        run_collection_loop(components),
+        name="correlator-loop"
+    )
+    components["tasks"].append(corr_task)
+
+    # TODO: Iniciar Uvicorn com a app FastAPI
+    # import uvicorn
+    # app = create_app(config)
+    # config_uvicorn = uvicorn.Config(app, host=config["host"], port=config["port"],
+    #                                  log_level=config["log_level"].lower())
+    # server = uvicorn.Server(config_uvicorn)
+    # await server.serve()
+
+    logger.info("Dashboard disponível em http://%s:%s", config["host"], config["port"])
+
+    try:
+        await asyncio.gather(*components["tasks"])
+    except KeyboardInterrupt:
+        logger.info("Encerrando Home Net Monitor...")
+        for task in components["tasks"]:
+            task.cancel()
+        await components["db"].close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main_async())
