@@ -114,7 +114,7 @@ def create_app(config: dict, components: dict = None):
     # CORS — apenas localhost (RNF06)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+        allow_origins=["*"],
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
@@ -129,6 +129,7 @@ def create_app(config: dict, components: dict = None):
             dns_collector=components.get("dns_collector"),
             snmp_collector=components.get("snmp_collector"),
             fingerprint_collector=components.get("fingerprint_collector"),
+            wifi_collector=components.get("wifi_collector"),
             db=components.get("db"),
             event_bus=components.get("event_bus"),
         )
@@ -194,10 +195,16 @@ async def startup(config: dict):
     from collectors.icmp import ICMPCollector
     from collectors.dns import DNSCollector
     from collectors.fingerprint import FingerprintCollector
+    from collectors.wifi import WiFiCollector
 
     icmp_collector = ICMPCollector(interval=config["icmp_interval"], db=db)
     dns_collector = DNSCollector(interval=config["dns_interval"], db=db)
     fingerprint_collector = FingerprintCollector(interval=config["fingerprint_interval"], db=db)
+    wifi_collector = WiFiCollector(
+        interface=config.get("wifi_interface"),
+        interval=config.get("wifi_interval", 30),
+        scan_neighbors=config.get("wifi_scan_neighbors", False),
+    )
 
     # SNMP — apenas se host configurado ou detectável
     snmp_collector = None
@@ -217,6 +224,7 @@ async def startup(config: dict):
         icmp_collector=icmp_collector,
         snmp_collector=snmp_collector,
         dns_collector=dns_collector,
+        wifi_collector=wifi_collector,
     )
 
     # 6. Inicia coletores como tasks asyncio
@@ -224,6 +232,7 @@ async def startup(config: dict):
         asyncio.create_task(icmp_collector.start(), name="icmp"),
         asyncio.create_task(dns_collector.start(), name="dns"),
         asyncio.create_task(fingerprint_collector.start(), name="fingerprint"),
+        asyncio.create_task(wifi_collector.start(), name="wifi"),
         asyncio.create_task(broadcaster.start(), name="sse-broadcast"),
     ]
     if snmp_collector:
@@ -240,6 +249,7 @@ async def startup(config: dict):
         "dns_collector": dns_collector,
         "snmp_collector": snmp_collector,
         "fingerprint_collector": fingerprint_collector,
+        "wifi_collector": wifi_collector,
         "tasks": tasks,
     }
 

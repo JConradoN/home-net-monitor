@@ -167,6 +167,36 @@ class BufferbloatResponse(BaseModel):
     timestamp: float = 0.0
 
 
+class WifiNeighborResponse(BaseModel):
+    bssid: str
+    ssid: Optional[str] = None
+    frequency_mhz: Optional[float] = None
+    channel: Optional[int] = None
+    signal_dbm: Optional[float] = None
+    band: Optional[str] = None
+
+
+class WifiMetricsResponse(BaseModel):
+    interface: str
+    connected: bool = False
+    ssid: Optional[str] = None
+    bssid: Optional[str] = None
+    frequency_mhz: Optional[float] = None
+    band: Optional[str] = None
+    signal_dbm: Optional[float] = None
+    link_quality_pct: Optional[float] = None
+    signal_quality_label: Optional[str] = None
+    tx_power_dbm: Optional[float] = None
+    noise_dbm: Optional[float] = None
+    tx_bitrate_mbps: Optional[float] = None
+    rx_bitrate_mbps: Optional[float] = None
+    tx_retries: Optional[int] = None
+    tx_failed: Optional[int] = None
+    beacon_loss: Optional[int] = None
+    neighbors: list[WifiNeighborResponse] = []
+    timestamp: float = 0.0
+
+
 # ─── Router ───────────────────────────────────────────────────────────────────
 
 
@@ -177,6 +207,7 @@ def create_router(
     dns_collector=None,
     snmp_collector=None,
     fingerprint_collector=None,
+    wifi_collector=None,
     db=None,
     event_bus=None,
 ) -> APIRouter:
@@ -204,6 +235,7 @@ def create_router(
         dns_collector=dns_collector,
         snmp_collector=snmp_collector,
         fingerprint_collector=fingerprint_collector,
+        wifi_collector=wifi_collector,
         db=db,
     )
 
@@ -283,6 +315,10 @@ def create_router(
     async def get_bufferbloat():
         return await routes.get_bufferbloat()
 
+    @router.get("/metrics/wifi", response_model=Optional[WifiMetricsResponse], summary="Métricas Wi-Fi local")
+    async def get_wifi_metrics():
+        return await routes.get_wifi_metrics()
+
     @router.get("/events", summary="Stream SSE de eventos em tempo real")
     async def sse_stream(request: Request):
         if event_bus is None:
@@ -313,13 +349,15 @@ class APIRoutes:
 
     def __init__(self, correlator=None, recommender=None,
                  icmp_collector=None, dns_collector=None,
-                 snmp_collector=None, fingerprint_collector=None, db=None):
+                 snmp_collector=None, fingerprint_collector=None,
+                 wifi_collector=None, db=None):
         self.correlator = correlator
         self.recommender = recommender
         self.icmp_collector = icmp_collector
         self.dns_collector = dns_collector
         self.snmp_collector = snmp_collector
         self.fingerprint_collector = fingerprint_collector
+        self.wifi_collector = wifi_collector
         self.db = db
 
     async def get_status(self) -> dict:
@@ -521,6 +559,44 @@ class APIRoutes:
             "message": "SNMP respondendo corretamente." if ok else "SNMP não respondeu. Verifique a configuração.",
             "host": host,
             "community": community,
+        }
+
+    async def get_wifi_metrics(self) -> Optional[dict]:
+        """
+        GET /api/metrics/wifi — Retorna métricas da interface Wi-Fi local.
+        """
+        if not self.wifi_collector or not self.wifi_collector.last_result:
+            return None
+        r = self.wifi_collector.last_result
+        return {
+            "interface": r.interface,
+            "connected": r.is_connected,
+            "ssid": r.ssid,
+            "bssid": r.bssid,
+            "frequency_mhz": r.frequency_mhz,
+            "band": r.band,
+            "signal_dbm": r.signal_dbm,
+            "link_quality_pct": r.link_quality_pct,
+            "signal_quality_label": r.signal_quality_label,
+            "tx_power_dbm": r.tx_power_dbm,
+            "noise_dbm": r.noise_dbm,
+            "tx_bitrate_mbps": r.tx_bitrate_mbps,
+            "rx_bitrate_mbps": r.rx_bitrate_mbps,
+            "tx_retries": r.tx_retries,
+            "tx_failed": r.tx_failed,
+            "beacon_loss": r.beacon_loss,
+            "neighbors": [
+                {
+                    "bssid": n.bssid,
+                    "ssid": n.ssid,
+                    "frequency_mhz": n.frequency_mhz,
+                    "channel": n.channel,
+                    "signal_dbm": n.signal_dbm,
+                    "band": n.band,
+                }
+                for n in r.neighbors
+            ],
+            "timestamp": r.timestamp,
         }
 
     async def get_bufferbloat(self) -> Optional[dict]:

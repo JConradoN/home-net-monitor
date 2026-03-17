@@ -309,12 +309,14 @@ class MetricsBroadcaster:
         icmp_collector=None,
         snmp_collector=None,
         dns_collector=None,
+        wifi_collector=None,
         interval: float = SSE_METRICS_INTERVAL,
     ):
         self.event_bus = event_bus
         self.icmp_collector = icmp_collector
         self.snmp_collector = snmp_collector
         self.dns_collector = dns_collector
+        self.wifi_collector = wifi_collector
         self.interval = interval
         self._running = False
 
@@ -370,6 +372,18 @@ class MetricsBroadcaster:
                 }
                 for name, stats in result.resolvers.items()
             }
+
+        if self.wifi_collector and self.wifi_collector.last_result:
+            w = self.wifi_collector.last_result
+            if w.is_connected:
+                metrics["wifi"] = {
+                    "ssid": w.ssid,
+                    "band": w.band,
+                    "signal_dbm": w.signal_dbm,
+                    "link_quality_pct": w.link_quality_pct,
+                    "tx_bitrate_mbps": w.tx_bitrate_mbps,
+                    "signal_quality_label": w.signal_quality_label,
+                }
 
         if metrics.keys() - {"timestamp"}:
             self.event_bus.publish("metrics", metrics)

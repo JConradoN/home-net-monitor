@@ -72,6 +72,47 @@
         </div>
       </div>
 
+      <!-- Card Wi-Fi Local -->
+      <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800" id="wifi-card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold text-gray-200">Wi-Fi Local</h2>
+          <span id="wifi-band-badge" class="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded-full hidden"></span>
+        </div>
+        <div id="wifi-disconnected" class="text-sm text-gray-500 italic">Detectando interface Wi-Fi...</div>
+        <div id="wifi-info" class="hidden">
+          <!-- SSID + qualidade -->
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="text-base font-semibold text-gray-100" id="wifi-ssid">—</div>
+              <div class="text-xs text-gray-500" id="wifi-bssid">—</div>
+            </div>
+            <div class="text-right">
+              <div class="text-2xl font-bold" id="wifi-signal-dbm">—</div>
+              <div class="text-xs text-gray-500">dBm · <span id="wifi-quality-label">—</span></div>
+            </div>
+          </div>
+          <!-- Barra de qualidade -->
+          <div class="w-full bg-gray-800 rounded-full h-1.5 mb-4">
+            <div id="wifi-quality-bar" class="h-1.5 rounded-full bg-blue-500 transition-all duration-500" style="width: 0%"></div>
+          </div>
+          <!-- Métricas secundárias -->
+          <div class="grid grid-cols-3 gap-3 text-center">
+            <div class="bg-gray-800 rounded-xl p-2">
+              <div class="text-xs text-gray-500 mb-0.5">TX Rate</div>
+              <div class="text-sm font-semibold text-gray-200"><span id="wifi-tx-rate">—</span> <span class="text-xs text-gray-500">Mbps</span></div>
+            </div>
+            <div class="bg-gray-800 rounded-xl p-2">
+              <div class="text-xs text-gray-500 mb-0.5">TX Power</div>
+              <div class="text-sm font-semibold text-gray-200"><span id="wifi-tx-power">—</span> <span class="text-xs text-gray-500">dBm</span></div>
+            </div>
+            <div class="bg-gray-800 rounded-xl p-2">
+              <div class="text-xs text-gray-500 mb-0.5">Retries</div>
+              <div class="text-sm font-semibold text-gray-200" id="wifi-retries">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Gráfico de latência — 24h -->
       <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
         <div class="flex items-center justify-between mb-4">

@@ -77,6 +77,9 @@ function updateMetrics(metrics) {
     setMetricValue('val-cpu', metrics.snmp.cpu_usage, '%');
     if (typeof addTrafficPoint === 'function') addTrafficPoint(metrics.snmp);
   }
+  if (metrics.wifi) {
+    updateWifi(metrics.wifi);
+  }
 }
 
 /**
@@ -352,6 +355,90 @@ function showSnmpResult(message, success) {
   div.textContent = message;
 }
 
+// ─── Wi-Fi Local ─────────────────────────────────────────────────────────────
+
+/**
+ * Atualiza o card Wi-Fi com dados do coletor local.
+ * Chamado via SSE (evento 'metrics') e polling REST.
+ *
+ * @param {Object} wifi - {ssid, band, signal_dbm, link_quality_pct, tx_bitrate_mbps, signal_quality_label}
+ */
+function updateWifi(wifi) {
+  const infoEl        = document.getElementById('wifi-info');
+  const disconnectEl  = document.getElementById('wifi-disconnected');
+  if (!infoEl || !disconnectEl) return;
+
+  if (!wifi || !wifi.ssid) {
+    infoEl.classList.add('hidden');
+    disconnectEl.classList.remove('hidden');
+    disconnectEl.textContent = 'Sem conexão Wi-Fi ativa.';
+    return;
+  }
+
+  infoEl.classList.remove('hidden');
+  disconnectEl.classList.add('hidden');
+
+  // SSID e BSSID
+  const ssidEl = document.getElementById('wifi-ssid');
+  if (ssidEl) ssidEl.textContent = wifi.ssid;
+  const bssidEl = document.getElementById('wifi-bssid');
+  if (bssidEl) bssidEl.textContent = wifi.bssid || (wifi.band || '');
+
+  // Sinal
+  const signalEl = document.getElementById('wifi-signal-dbm');
+  if (signalEl) signalEl.textContent = wifi.signal_dbm != null ? `${wifi.signal_dbm.toFixed(0)}` : '—';
+
+  // Cor do sinal
+  const dbm = wifi.signal_dbm || -100;
+  const signalColor = dbm >= -50 ? 'text-green-400' : dbm >= -65 ? 'text-yellow-400' : 'text-red-400';
+  if (signalEl) signalEl.className = `text-2xl font-bold ${signalColor}`;
+
+  // Label de qualidade
+  const labelEl = document.getElementById('wifi-quality-label');
+  if (labelEl) labelEl.textContent = wifi.signal_quality_label || '—';
+
+  // Barra de qualidade
+  const bar = document.getElementById('wifi-quality-bar');
+  if (bar) {
+    const pct = wifi.link_quality_pct != null ? wifi.link_quality_pct : 0;
+    bar.style.width = `${pct}%`;
+    bar.className = `h-1.5 rounded-full transition-all duration-500 ${
+      pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-red-500'
+    }`;
+  }
+
+  // Badge de banda
+  const bandBadge = document.getElementById('wifi-band-badge');
+  if (bandBadge && wifi.band) {
+    bandBadge.textContent = wifi.band;
+    bandBadge.classList.remove('hidden');
+  }
+
+  // Métricas secundárias
+  const txRate = document.getElementById('wifi-tx-rate');
+  if (txRate) txRate.textContent = wifi.tx_bitrate_mbps != null ? wifi.tx_bitrate_mbps.toFixed(0) : '—';
+
+  const txPower = document.getElementById('wifi-tx-power');
+  if (txPower) txPower.textContent = wifi.tx_power_dbm != null ? wifi.tx_power_dbm.toFixed(0) : '—';
+
+  const retries = document.getElementById('wifi-retries');
+  if (retries) retries.textContent = wifi.tx_retries != null ? wifi.tx_retries : '—';
+}
+
+/**
+ * Carrega métricas Wi-Fi via REST.
+ */
+async function loadWifiMetrics() {
+  try {
+    const res = await fetch(`${API_BASE}/metrics/wifi`);
+    if (!res.ok) return;
+    const wifi = await res.json();
+    if (wifi) updateWifi(wifi);
+  } catch (err) {
+    console.warn('[Dashboard] Erro ao carregar métricas Wi-Fi:', err);
+  }
+}
+
 // ─── Polling REST (fallback) ─────────────────────────────────────────────────
 
 /**
@@ -364,6 +451,7 @@ async function loadInitialState() {
     loadRecommendations(),
     loadOutageHistory(),
     loadCurrentMetrics(),
+    loadWifiMetrics(),
   ]);
 }
 
