@@ -6,6 +6,8 @@ Coleta métricas contínuas de latência, DNS, Wi-Fi e Mikrotik, correlaciona os
 
 > **Em produção** como serviço systemd no fox-server desde março/2026.
 
+![Dashboard principal com alertas ativos e métricas em tempo real](docs/screenshots/fox-noc_dashboard-1.jpg)
+
 ---
 
 ## O que faz
@@ -17,6 +19,8 @@ O HNM roda em background e monitora continuamente:
 - **SNMP (Mikrotik)** — CPU, tráfego WAN, channel utilization, noise floor, retries por rádio
 - **Wi-Fi local** — métricas da interface local do host
 - **Fingerprint** — ARP scan, vendor MAC (OUI), hostname via mDNS, classificação de dispositivos
+
+![Topologia da rede, traceroute por hop e métricas mesh Wi-Fi](docs/screenshots/fox-noc_dashboard-2.jpg)
 
 Um **motor de correlação** cruza esses dados e produz diagnósticos precisos:
 
@@ -31,6 +35,8 @@ Um **motor de correlação** cruza esses dados e produz diagnósticos precisos:
 | Delta de latência sob carga > 30ms | Bufferbloat |
 | Gateway sem resposta > 30s | Queda de conexão |
 | Noise floor > −75 dBm | Ruído excessivo |
+
+![Análise detalhada por IA com alertas e recomendações acionáveis](docs/screenshots/fox-noc_dashboard-4.jpg)
 
 ---
 
