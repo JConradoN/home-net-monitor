@@ -1,180 +1,164 @@
+# Home Net Monitor
 
-# 🏠 **Home Net Monitor**  
-Diagnóstico inteligente para redes domésticas brasileiras — 100% offline.
+Monitor de rede doméstica com diagnóstico inteligente — 100% offline.
 
----
+Coleta métricas contínuas de latência, DNS, Wi-Fi e Mikrotik, correlaciona os dados e exibe alertas acionáveis em um dashboard web em tempo real.
 
-## 📌 Sobre o Projeto
-
-O **Home Net Monitor (HNM)** é uma ferramenta local, leve e modular para diagnóstico de redes domésticas.  
-Ele identifica gargalos de **Wi‑Fi**, **DNS**, **operadora**, **Mikrotik** e **redes mesh** (Twibi, Deco, Google Wi‑Fi), correlaciona métricas internas e externas e apresenta **alertas claros com recomendações práticas**.
-
-O sistema funciona **100% offline** — nenhum dado sai da sua rede.
+> **Em produção** como serviço systemd no fox-server desde março/2026.
 
 ---
 
-## ✨ Principais Recursos
+## O que faz
 
-- 🔍 **Diagnóstico automático** de problemas de rede  
-- 📡 **Coleta de métricas reais** via ICMP, DNS, SNMP e RouterOS API  
-- 📶 Análise de **Wi‑Fi**, interferência, saturação e backhaul  
-- 🌐 Detecção de problemas na **operadora**  
-- 📊 **Dashboard web** com gráficos, alertas e histórico  
-- 🧠 Motor de correlação para identificar **onde está o problema**  
-- 🧩 Arquitetura modular — coletores plugáveis  
-- 🛡️ Funciona totalmente **offline**  
-- 🧰 Compatível com **Raspberry Pi**  
+O HNM roda em background e monitora continuamente:
+
+- **ICMP** — latência e perda para gateway, DNS interno, DNS externo e internet pública
+- **DNS** — tempo de resposta de resolvers internos e externos
+- **SNMP (Mikrotik)** — CPU, tráfego WAN, channel utilization, noise floor, retries por rádio
+- **Wi-Fi local** — métricas da interface local do host
+- **Fingerprint** — ARP scan, vendor MAC (OUI), hostname via mDNS, classificação de dispositivos
+
+Um **motor de correlação** cruza esses dados e produz diagnósticos precisos:
+
+| Sintoma detectado | Diagnóstico |
+|---|---|
+| Gateway OK + internet lenta | Problema na operadora |
+| Gateway lento via Wi-Fi | Interferência ou saturação do rádio |
+| DNS interno lento + externo rápido | Roteador sobrecarregado |
+| CPU Mikrotik > 80% por > 60s | NAT/Firewall saturado |
+| Channel utilization > 70% | Wi-Fi saturado |
+| Retries > 15% | Interferência de RF |
+| Delta de latência sob carga > 30ms | Bufferbloat |
+| Gateway sem resposta > 30s | Queda de conexão |
+| Noise floor > −75 dBm | Ruído excessivo |
 
 ---
 
-## 🖥️ Capturas de Tela (placeholder)
+## Stack
 
-> *(As imagens serão adicionadas após o primeiro build do dashboard)*
+- **Python 3.11+**, FastAPI, AsyncIO
+- **SQLite** (WAL mode) para histórico persistente
+- **Dashboard** — Tailwind CSS + Chart.js + SSE (atualizações em tempo real sem polling)
+- **API REST** documentada em `/api/docs`
+- **SNMP v2c** via pysnmp, **ARP scan** via Scapy, **mDNS** via zeroconf
+
+---
+
+## Arquitetura
 
 ```
-[ Dashboard Overview ]
-[ Alertas em Tempo Real ]
-[ Histórico de Latência ]
-[ Lista de Dispositivos ]
+collectors/     — Coletores independentes (icmp, dns, snmp, fingerprint, wifi)
+engine/         — Correlator (10 regras) + Recommender
+api/            — REST endpoints (read-only) + SSE stream
+db/             — Repositório SQLite assíncrono
+frontend/       — Dashboard HTML/CSS/JS (templates + static)
+tests/          — pytest com alvo ≥ 80% de cobertura
 ```
+
+Cada coletor é uma `asyncio.Task` independente — falha de um não derruba os outros.
 
 ---
 
-## 🚀 Instalação
+## Instalação
 
-### Pré‑requisitos
-- Python 3.11+  
-- pip  
-- (Opcional) Raspberry Pi 3+  
+### Pré-requisitos
 
-### Instalação rápida
+- Python 3.11+
+- Linux (testado em Ubuntu Server 24.04 e Raspberry Pi OS)
+- Mikrotik com SNMP habilitado (opcional)
+
+### Instalar como serviço systemd
 
 ```bash
 git clone https://github.com/<seu-usuario>/home-net-monitor.git
 cd home-net-monitor
-pip install -r requirements.txt
-python main.py
+sudo bash install.sh
 ```
 
-Acesse o dashboard em:
+O `install.sh` cria o virtualenv, instala dependências, concede `cap_net_raw` para ICMP sem root e habilita o serviço.
 
-```
-http://localhost:8000
-```
-
----
-
-## 🧙 Wizard de Configuração (SNMP Mikrotik)
-
-Se você usa Mikrotik, o HNM ajuda a habilitar SNMP automaticamente.
-
-Comando sugerido:
+Antes de instalar, copie e ajuste o arquivo de configuração:
 
 ```bash
-/snmp set enabled=yes
-/snmp community add name=public addresses=192.168.1.0/24
+cp config.example.json config.json
+# edite config.json com o IP do seu roteador e community SNMP
 ```
 
-O wizard testa a conectividade e valida os coletores antes de iniciar o monitoramento.
+### Rodar manualmente (dev)
 
----
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-## 📡 O que o HNM Monitora
-
-### 🔧 Métricas de Rede
-- Latência e perda para:
-  - Gateway  
-  - DNS interno  
-  - DNS externo  
-  - Internet (Google/Cloudflare)
-
-### 📶 Métricas Wi‑Fi (via Mikrotik)
-- Channel Utilization  
-- Noise Floor  
-- Retries  
-- Clientes por rádio  
-
-### 🌐 Operadora
-- Instabilidade  
-- Perda de pacotes  
-- Rota lenta  
-- Bufferbloat  
-
-### 🧩 Dispositivos
-- ARP scan  
-- Vendor MAC (OUI)  
-- Hostname via mDNS/NetBIOS  
-- Classificação heurística (TV, celular, notebook, IoT)  
-
----
-
-## 🧠 Motor de Diagnóstico
-
-O HNM correlaciona métricas para identificar a causa real do problema:
-
-| Sintoma | Diagnóstico |
-|--------|-------------|
-| Ping Gateway baixo + Ping Internet alto | Problema na operadora |
-| Ping Gateway alto | Problema no Wi‑Fi ou cabo |
-| DNS interno lento | Roteador da operadora sobrecarregado |
-| DNS externo lento | Problema de rota |
-| CPU Mikrotik alta | NAT/Firewall sobrecarregado |
-| Channel Utilization alto | Wi‑Fi saturado |
-| Retries altos | Interferência |
-
----
-
-## 📘 Documentação Completa
-
-Toda a documentação oficial está disponível em:
-
-👉 **`[Parece que o resultado não era seguro para exibição. Vamos mudar as coisas e tentar outra opção!]`**
-
-Inclui:
-- PRD completo  
-- Requisitos funcionais e não funcionais  
-- Roadmap  
-- Glossário  
-- Riscos e mitigações  
-
----
-
-## 🛣️ Roadmap (Resumo)
-
-- **Fase 1 — MVP**  
-  ICMP, DNS, SNMP básico, dashboard simples
-
-- **Fase 2 — Expansão**  
-  Fingerprinting, métricas Wi‑Fi, gráficos, bufferbloat
-
-- **Fase 3 — Polimento**  
-  UI Tailwind, histórico de quedas, wizard SNMP, testes
-
----
-
-## 🤝 Contribuindo
-
-Contribuições são bem‑vindas!  
-Sugestões, issues e PRs podem ser enviados diretamente no repositório.
-
----
-
-## 🛡️ Licença
-
-Escolha sua licença (MIT recomendado).  
-Exemplo:
-
+python main.py --debug
+# Com SNMP:
+python main.py --snmp-host 192.168.1.1
 ```
-MIT License
-Copyright (c) 2026
+
+Dashboard disponível em `http://localhost:8080` — API docs em `http://localhost:8080/api/docs`.
+
+### Docker
+
+```bash
+docker build -t home-net-monitor .
+docker run --network host home-net-monitor
 ```
 
 ---
 
-## 💬 Contato
+## Configuração (config.json)
 
-Criado por **João Conrado**  
-Para dúvidas ou sugestões, abra uma issue no GitHub.
+```json
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "snmp_host": "192.168.1.1",
+  "snmp_community": "public",
+  "icmp_interval": 30,
+  "dns_interval": 60,
+  "snmp_interval": 60,
+  "fingerprint_interval": 300,
+  "thresholds": {
+    "gw_latency_high": 50,
+    "internet_latency_high": 150,
+    "dns_slow": 100,
+    "cpu_critical": 80,
+    "channel_util": 70,
+    "retries": 15
+  }
+}
+```
 
+---
 
-É só pedir.
+## API REST
+
+Todos os endpoints são read-only (GET). Acesse a documentação interativa em `/api/docs`.
+
+| Endpoint | Descrição |
+|---|---|
+| `GET /api/status` | Status geral (ok / warning / critical) |
+| `GET /api/alerts` | Alertas ativos com severidade e mensagem |
+| `GET /api/metrics/icmp` | Últimas métricas de latência e perda |
+| `GET /api/metrics/dns` | Últimas métricas DNS |
+| `GET /api/metrics/snmp` | CPU, tráfego, Wi-Fi via Mikrotik |
+| `GET /api/devices` | Dispositivos descobertos na rede |
+| `GET /api/history/outages` | Histórico de quedas (7 dias) |
+| `GET /api/history/latency` | Série histórica de latência (24h) |
+| `GET /api/recommendations` | Recomendações ativas com passos RouterOS |
+| `GET /api/events` | Stream SSE — atualizações em tempo real |
+
+---
+
+## Testes
+
+```bash
+pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+---
+
+## Licença
+
+MIT License — Copyright (c) 2026 João Conrado

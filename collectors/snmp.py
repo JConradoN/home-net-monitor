@@ -250,7 +250,7 @@ class PySNMPSession:
         if self._engine is not None:
             return
         try:
-            from pysnmp.hlapi.asyncio import SnmpEngine
+            from pysnmp.hlapi.v3arch.asyncio import SnmpEngine
             self._engine = SnmpEngine()
         except ImportError:
             raise ImportError(
@@ -259,18 +259,18 @@ class PySNMPSession:
 
     def _build_objects(self, *oids: str):
         """Constrói ObjectType para pysnmp a partir de strings OID."""
-        from pysnmp.hlapi.asyncio import ObjectType, ObjectIdentity
+        from pysnmp.hlapi.v3arch.asyncio import ObjectType, ObjectIdentity
         return [ObjectType(ObjectIdentity(oid)) for oid in oids]
 
     def _build_auth(self):
         """Constrói CommunityData para SNMPv2c."""
-        from pysnmp.hlapi.asyncio import CommunityData
+        from pysnmp.hlapi.v3arch.asyncio import CommunityData
         return CommunityData(self.community, mpModel=1)   # mpModel=1 → v2c
 
-    def _build_transport(self):
+    async def _build_transport(self):
         """Constrói UdpTransportTarget."""
-        from pysnmp.hlapi.asyncio import UdpTransportTarget
-        return UdpTransportTarget(
+        from pysnmp.hlapi.v3arch.asyncio import UdpTransportTarget
+        return await UdpTransportTarget.create(
             (self.host, self.port),
             timeout=self.timeout,
             retries=self.retries,
@@ -322,8 +322,8 @@ class PySNMPSession:
             SNMPError: Em caso de timeout, host inacessível ou community errada.
         """
         self._ensure_engine()
-        from pysnmp.hlapi.asyncio import (
-            getCmd, ContextData,
+        from pysnmp.hlapi.v3arch.asyncio import (
+            get_cmd as getCmd, ContextData,
         )
 
         objects = self._build_objects(*oids)
@@ -332,7 +332,7 @@ class PySNMPSession:
         error_indication, error_status, error_index, var_binds = await getCmd(
             self._engine,
             self._build_auth(),
-            self._build_transport(),
+            await self._build_transport(),
             ContextData(),
             *objects,
         )
@@ -361,8 +361,8 @@ class PySNMPSession:
         Fallback automático para nextCmd se GetBulk não for suportado.
         """
         self._ensure_engine()
-        from pysnmp.hlapi.asyncio import (
-            nextCmd, ContextData, ObjectType, ObjectIdentity,
+        from pysnmp.hlapi.v3arch.asyncio import (
+            walk_cmd as nextCmd, ContextData, ObjectType, ObjectIdentity,
         )
 
         results: list[tuple[str, Any]] = []
@@ -371,7 +371,7 @@ class PySNMPSession:
         async for error_indication, error_status, _, var_binds in nextCmd(
             self._engine,
             self._build_auth(),
-            self._build_transport(),
+            await self._build_transport(),
             ContextData(),
             obj,
             lexicographicMode=False,

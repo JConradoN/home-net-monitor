@@ -41,11 +41,22 @@ TEST_DOMAINS: list[str] = [
     "uol.com.br",
 ]
 
-# Domínios estáveis para detecção de hijacking (respostas bem conhecidas)
+# Domínios estáveis para detecção de hijacking — IPs fixos e conhecidos.
+# dns.google  → sempre 8.8.8.8 / 8.8.4.4
+# one.one.one.one → sempre 1.1.1.1 / 1.0.0.1
+# Evitar domínios CDN pesados (google.com, cloudflare.com) — retornam IPs
+# diferentes por geo-localização e causam falsos positivos com DoH ativo.
 HIJACK_TEST_DOMAINS: list[str] = [
-    "google.com",
-    "cloudflare.com",
+    "dns.google",
+    "one.one.one.one",
 ]
+
+# IPs esperados por domínio estável — qualquer resposta fora desses conjuntos
+# é sinal concreto de hijacking, não variação de CDN.
+HIJACK_EXPECTED_IPS: dict[str, set[str]] = {
+    "dns.google":     {"8.8.8.8", "8.8.4.4"},
+    "one.one.one.one": {"1.1.1.1", "1.0.0.1"},
+}
 
 DNS_PORT = 53
 DNS_TIMEOUT = 3.0           # segundos por query
@@ -363,15 +374,39 @@ class DNSCollector:
                 hijacked = False
                 details = "Não foi possível comparar — uma ou mais queries falharam"
             else:
-                overlap = set(int_answers) & set(ext_answers)
-                hijacked = len(overlap) == 0
-                if hijacked:
-                    details = (
-                        f"Respostas completamente diferentes: "
-                        f"interno={int_answers} externo={ext_answers}"
-                    )
+                expected = HIJACK_EXPECTED_IPS.get(domain)
+                if expected:
+                    # Domínio com IPs fixos conhecidos: qualquer resposta fora do
+                    # conjunto esperado é hijacking real, independente de CDN.
+                    unexpected = set(int_answers) - expected
+                    hijacked = len(unexpected) > 0 and not (set(int_answers) & expected)
+                    if hijacked:
+                        details = (
+                            f"Resposta inesperada para domínio fixo: "
+                            f"esperado={sorted(expected)} recebido={int_answers}"
+                        )
+                    else:
+                        details = "Respostas dentro do conjunto esperado"
                 else:
-                    details = "Respostas consistentes"
+                    # Domínio CDN: compara por prefixo /16 para tolerar variação geo
+                    def _prefix16(ip: str) -> str:
+                        try:
+                            parts = ip.split(".")
+                            return f"{parts[0]}.{parts[1]}"
+                        except Exception:
+                            return ip
+
+                    int_prefixes = {_prefix16(ip) for ip in int_answers}
+                    ext_prefixes = {_prefix16(ip) for ip in ext_answers}
+                    overlap = int_prefixes & ext_prefixes
+                    hijacked = len(overlap) == 0
+                    if hijacked:
+                        details = (
+                            f"Respostas completamente diferentes: "
+                            f"interno={int_answers} externo={ext_answers}"
+                        )
+                    else:
+                        details = "Respostas consistentes"
 
             results.append(DNSHijackResult(
                 domain=domain,

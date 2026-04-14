@@ -1,12 +1,12 @@
 {
-  "host": "0.0.0.0",
+  "host": "127.0.0.1",
   "port": 8080,
   "db_path": "data/home_net_monitor.db",
   "icmp_interval": 30,
   "dns_interval": 60,
   "snmp_interval": 60,
   "fingerprint_interval": 300,
-  "snmp_host": null,
+  "snmp_host": "192.168.1.1",
   "snmp_community": "public",
   "log_level": "INFO",
   "thresholds": {

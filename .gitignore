@@ -36,3 +36,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Configuração local (contém IPs e credenciais da rede)
+config.json
