@@ -1,108 +1,126 @@
 # Home Net Monitor
 
-Monitor de rede doméstica com diagnóstico inteligente — 100% offline.
+> Continuous network monitoring with intelligent diagnostics — real-time alerts, root cause correlation, and actionable recommendations. 100% offline, no cloud required.
 
-Coleta métricas contínuas de latência, DNS, Wi-Fi e Mikrotik, correlaciona os dados e exibe alertas acionáveis em um dashboard web em tempo real.
+![Dashboard with active alerts and real-time metrics](docs/screenshots/fox-noc_dashboard-1.jpg)
 
-> **Em produção** como serviço systemd no fox-server desde março/2026.
+[![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-async-green?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-lightgrey?logo=sqlite)](https://www.sqlite.org/)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![Dashboard principal com alertas ativos e métricas em tempo real](docs/screenshots/fox-noc_dashboard-1.jpg)
+**Running in production as a systemd service on a home server since March 2026.**
 
 ---
 
-## O que faz
+## What It Does
 
-O HNM roda em background e monitora continuamente:
+Most network monitoring tools give you graphs. This one gives you **diagnoses**.
 
-- **ICMP** — latência e perda para gateway, DNS interno, DNS externo e internet pública
-- **DNS** — tempo de resposta de resolvers internos e externos
-- **SNMP (Mikrotik)** — CPU, tráfego WAN, channel utilization, noise floor, retries por rádio
-- **Wi-Fi local** — métricas da interface local do host
-- **Fingerprint** — ARP scan, vendor MAC (OUI), hostname via mDNS, classificação de dispositivos
+Home Net Monitor runs continuously in the background, collecting metrics from multiple sources simultaneously. A correlation engine cross-references those metrics against 10 diagnostic rules and tells you not just *what* is wrong, but *why* — with specific RouterOS commands to fix it.
 
-![Topologia da rede, traceroute por hop e métricas mesh Wi-Fi](docs/screenshots/fox-noc_dashboard-2.jpg)
+### Collectors (run in parallel as async tasks)
 
-Um **motor de correlação** cruza esses dados e produz diagnósticos precisos:
-
-| Sintoma detectado | Diagnóstico |
+| Collector | What it measures |
 |---|---|
-| Gateway OK + internet lenta | Problema na operadora |
-| Gateway lento via Wi-Fi | Interferência ou saturação do rádio |
-| DNS interno lento + externo rápido | Roteador sobrecarregado |
-| CPU Mikrotik > 80% por > 60s | NAT/Firewall saturado |
-| Channel utilization > 70% | Wi-Fi saturado |
-| Retries > 15% | Interferência de RF |
-| Delta de latência sob carga > 30ms | Bufferbloat |
-| Gateway sem resposta > 30s | Queda de conexão |
-| Noise floor > −75 dBm | Ruído excessivo |
+| **ICMP** | Latency, jitter, packet loss to gateway, internal DNS, external DNS, internet |
+| **DNS** | Response times from internal and external resolvers |
+| **SNMP (MikroTik)** | CPU load, WAN traffic, channel utilization, noise floor, retry rate |
+| **Wi-Fi** | Local wireless interface signal and quality |
+| **Fingerprint** | ARP scan + MAC OUI vendor lookup + mDNS hostname + device classification |
 
-![Análise detalhada por IA com alertas e recomendações acionáveis](docs/screenshots/fox-noc_dashboard-4.jpg)
+Each collector is an independent `asyncio.Task` — one failure never brings down the others.
 
 ---
 
-## Stack
+## Correlation Engine — Diagnostics Table
 
-- **Python 3.11+**, FastAPI, AsyncIO
-- **SQLite** (WAL mode) para histórico persistente
-- **Dashboard** — Tailwind CSS + Chart.js + SSE (atualizações em tempo real sem polling)
-- **API REST** documentada em `/api/docs`
-- **SNMP v2c** via pysnmp, **ARP scan** via Scapy, **mDNS** via zeroconf
+| Detected symptom | Diagnosis |
+|---|---|
+| Gateway OK + slow internet | ISP-side problem |
+| Gateway slow over Wi-Fi | Radio interference or saturation |
+| Internal DNS slow + external fast | Router overloaded |
+| MikroTik CPU > 80% for > 60s | NAT/Firewall saturated |
+| Channel utilization > 70% | Wi-Fi congested |
+| Retry rate > 15% | RF interference |
+| Latency delta under load > 30ms | Bufferbloat |
+| Gateway unreachable > 30s | Connection down |
+| Noise floor > −75 dBm | Excessive RF noise |
+| WAN IP changed unexpectedly | ISP failover or modem reset |
 
 ---
 
-## Arquitetura
+## Screenshots
+
+![Network topology, traceroute per hop and mesh Wi-Fi metrics](docs/screenshots/fox-noc_dashboard-2.jpg)
+
+![Device inventory with classification and fingerprint](docs/screenshots/fox-noc_dashboard-3.jpg)
+
+![AI-assisted analysis with alerts and actionable recommendations](docs/screenshots/fox-noc_dashboard-4.jpg)
+
+![Historical latency and outage timeline](docs/screenshots/fox-noc_dashboard-5.jpg)
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.11+, FastAPI, AsyncIO |
+| Real-time updates | Server-Sent Events (SSE) — no polling |
+| Frontend | Tailwind CSS, Chart.js |
+| Storage | SQLite (WAL mode) — persistent history |
+| Network scanning | Scapy (ARP), pysnmp (SNMP v2c), zeroconf (mDNS) |
+| Deploy | systemd service, Docker |
+
+---
+
+## Architecture
 
 ```
-collectors/     — Coletores independentes (icmp, dns, snmp, fingerprint, wifi)
-engine/         — Correlator (10 regras) + Recommender
-api/            — REST endpoints (read-only) + SSE stream
-db/             — Repositório SQLite assíncrono
-frontend/       — Dashboard HTML/CSS/JS (templates + static)
-tests/          — pytest com alvo ≥ 80% de cobertura
-```
+collectors/
+  icmp.py         — async ICMP probes (no root required — uses cap_net_raw)
+  dns.py          — DNS resolver timing
+  snmp.py         — MikroTik SNMP v2c
+  wifi.py         — local Wi-Fi interface metrics
+  fingerprint.py  — ARP + OUI + mDNS device discovery
 
-Cada coletor é uma `asyncio.Task` independente — falha de um não derruba os outros.
+engine/
+  correlator.py   — 10 diagnostic rules, cross-source correlation
+  recommender.py  — maps diagnoses to specific fix commands (RouterOS)
+
+api/              — FastAPI REST endpoints + SSE stream
+db/               — async SQLite repository (WAL mode)
+frontend/         — dashboard HTML/CSS/JS (Tailwind + Chart.js)
+tests/            — pytest, target ≥ 80% coverage
+```
 
 ---
 
-## Instalação
+## Quick Start
 
-### Pré-requisitos
-
-- Python 3.11+
-- Linux (testado em Ubuntu Server 24.04 e Raspberry Pi OS)
-- Mikrotik com SNMP habilitado (opcional)
-
-### Instalar como serviço systemd
+### As a systemd service (recommended for production)
 
 ```bash
-git clone https://github.com/<seu-usuario>/home-net-monitor.git
+git clone https://github.com/JConradoN/home-net-monitor.git
 cd home-net-monitor
+cp config.example.json config.json
+# Edit config.json: set your router IP and SNMP community
 sudo bash install.sh
 ```
 
-O `install.sh` cria o virtualenv, instala dependências, concede `cap_net_raw` para ICMP sem root e habilita o serviço.
+`install.sh` creates the virtualenv, installs dependencies, grants `cap_net_raw` for ICMP without root, and enables the service. Dashboard available at `http://localhost:8080`.
 
-Antes de instalar, copie e ajuste o arquivo de configuração:
-
-```bash
-cp config.example.json config.json
-# edite config.json com o IP do seu roteador e community SNMP
-```
-
-### Rodar manualmente (dev)
+### Manual / development
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
 python main.py --debug
-# Com SNMP:
+# With MikroTik SNMP:
 python main.py --snmp-host 192.168.1.1
 ```
-
-Dashboard disponível em `http://localhost:8080` — API docs em `http://localhost:8080/api/docs`.
 
 ### Docker
 
@@ -113,7 +131,7 @@ docker run --network host home-net-monitor
 
 ---
 
-## Configuração (config.json)
+## Configuration
 
 ```json
 {
@@ -138,26 +156,26 @@ docker run --network host home-net-monitor
 
 ---
 
-## API REST
+## REST API
 
-Todos os endpoints são read-only (GET). Acesse a documentação interativa em `/api/docs`.
+Full interactive docs at `/api/docs` (Swagger UI).
 
-| Endpoint | Descrição |
+| Endpoint | Description |
 |---|---|
-| `GET /api/status` | Status geral (ok / warning / critical) |
-| `GET /api/alerts` | Alertas ativos com severidade e mensagem |
-| `GET /api/metrics/icmp` | Últimas métricas de latência e perda |
-| `GET /api/metrics/dns` | Últimas métricas DNS |
-| `GET /api/metrics/snmp` | CPU, tráfego, Wi-Fi via Mikrotik |
-| `GET /api/devices` | Dispositivos descobertos na rede |
-| `GET /api/history/outages` | Histórico de quedas (7 dias) |
-| `GET /api/history/latency` | Série histórica de latência (24h) |
-| `GET /api/recommendations` | Recomendações ativas com passos RouterOS |
-| `GET /api/events` | Stream SSE — atualizações em tempo real |
+| `GET /api/status` | Overall status: ok / warning / critical |
+| `GET /api/alerts` | Active alerts with severity and message |
+| `GET /api/metrics/icmp` | Latest latency and packet loss |
+| `GET /api/metrics/dns` | Latest DNS response times |
+| `GET /api/metrics/snmp` | CPU, traffic, Wi-Fi via MikroTik |
+| `GET /api/devices` | Discovered devices with fingerprint |
+| `GET /api/history/outages` | Outage history (7 days) |
+| `GET /api/history/latency` | Latency time series (24h) |
+| `GET /api/recommendations` | Active recommendations with RouterOS steps |
+| `GET /api/events` | SSE stream — real-time push updates |
 
 ---
 
-## Testes
+## Tests
 
 ```bash
 pytest tests/ -v --cov=. --cov-report=term-missing
@@ -165,6 +183,31 @@ pytest tests/ -v --cov=. --cov-report=term-missing
 
 ---
 
-## Licença
+## Part of the FOX Network Intelligence Suite
 
-MIT License — Copyright (c) 2026 João Conrado
+This tool is designed to work alongside **[Network Diagnoser AI](https://github.com/JConradoN/network-diagnoser-ai)** as a complementary pair:
+
+| Tool | Role | When to use |
+|---|---|---|
+| **Home Net Monitor** (this) | Passive 24/7 daemon — detects and alerts | Always running in the background |
+| **[Network Diagnoser AI](https://github.com/JConradoN/network-diagnoser-ai)** | Active on-demand scanner — deep diagnosis | When an alert fires and you need to investigate |
+
+**Typical workflow:**
+1. Home Net Monitor fires a "gateway latency spike" alert
+2. You trigger Network Diagnoser AI to run a full scan
+3. Diagnoser performs ARP sweep, SNMP deep-dive, mDNS/SSDP discovery, and sends structured data to an LLM
+4. You get a root cause analysis and specific fix steps in plain English
+
+---
+
+## Background
+
+Built by a network engineer with 30 years of infrastructure experience. The diagnostic rules in the correlation engine come from real-world troubleshooting patterns — the same mental model an experienced engineer uses when diagnosing a network complaint, encoded as software.
+
+Compatible with any Linux host. Optimized for home and small office networks with MikroTik routers.
+
+---
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2026 João Conrado
